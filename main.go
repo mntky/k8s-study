@@ -15,7 +15,7 @@ limitations under the License.
 */
 package main
 
-import "github.com/mntky/k8s-study/cmd"
+import "k8s-study/cmd"
 
 func main() {
   cmd.Execute()
