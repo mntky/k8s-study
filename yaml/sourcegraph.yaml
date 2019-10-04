@@ -1,0 +1,43 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sourcegraph
+  labels:
+    app: sourcegraph
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sourcegraph
+  template:
+    metadata:
+      labels:
+        app: sourcegraph
+    spec:
+      containers:
+      - name: sourcegraph
+        image: sourcegraph/server:3.8.0
+        ports:
+        - containerPort: 7080
+          name: defaultport
+        - containerPort: 2633
+          name: adminport
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sourcegraph-srv
+  labels:
+    app: sourcegraph
+spec:
+  type: LoadBalancer
+  ports:
+    - name: "default"
+      port: 7080
+      targetPort: defaultport
+    - name: "admin"
+      port: 2633
+      targetPort: adminport
+  selector:
+     app: sourcegraph

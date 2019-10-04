@@ -1,0 +1,25 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sourcegraph
+  labels:
+    app: sourcegraph
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sourcegraph
+  template:
+    metadata:
+      labels:
+        app: sourcegraph
+    spec:
+      containers:
+      - name: sourcegraph
+        image: sourcegraph/server:3.8.0
+        ports:
+        - containerPort: 7080
+          name: defaultport
+        - containerPort: 2633
+          name: adminport
