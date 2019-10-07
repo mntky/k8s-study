@@ -1,0 +1,10 @@
+digraph g{
+	graph[
+		layout  = circo
+	]
+	A;
+	B;
+	C;
+	D;
+	A->B->C;
+}
