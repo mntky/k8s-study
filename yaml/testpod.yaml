@@ -4,14 +4,9 @@ metadata:
   name: test
 spec:
   containers:
-    - image: apache2
-      name: apache2
+    - image: httpd
+      name: httpd
       ports:
         - containerPort: 80
           name: http
           protocol: TCP
-  tolerations:
-    - key: "app"
-      operator: "Equal"
-      value: "mnt"
-      effect: "NoSchedule"
