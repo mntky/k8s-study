@@ -1,26 +1,97 @@
-package commands
+/*
+Copyright © 2019 NAME HERE <EMAIL ADDRESS>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+package cmd
 
 import (
-	"fmt"
-	"github.com/spf13/cobra"
+  "fmt"
+  "os"
+  "github.com/spf13/cobra"
+
+  homedir "github.com/mitchellh/go-homedir"
+  "github.com/spf13/viper"
+
 )
 
-var CfgFile string
-var Verbose bool
 
-var RootCmd = &cobra.Command{
-	Use:	"k8study",
-	Short:	"test k8study command",
-	Long:	`test k8study command.
-				yeeeeeeeee.
-			`,
-	Run:	func(cmd *cobra.Command, args []string){
-				fmt.Println("k8study test command dayo")
-			},
+var (
+	cfgFile			string
+	userLicense string
+
+	rootCmd = &cobra.Command{
+		Use:   "k8s-study",
+		Short: "short description",
+		Long: "lonnggg description",
 	}
+)
 
-//func init() {
-//	//持続的なフラグ
-//	RootCmd.PersistentFlags().StringVar(CfgFile, "config", "", "$HOME/k8s-study/cmd/config.yaml")
-//	//RootCmd.PersistentFlags().String("
-//}
+
+func Execute() error {
+	return rootCmd.Execute()
+}
+
+func init() {
+  cobra.OnInitialize(initConfig)
+
+  // Here you will define your flags and configuration settings.
+  // Cobra supports persistent flags, which, if defined here,
+  // will be global for your application.
+  rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.k8s-study.yaml)")
+	rootCmd.PersistentFlags().StringP("author", "a", "mntky", "author name copright attribution")
+	rootCmd.PersistentFlags().StringVarP(&userLicense, "license", "l", "", "GPL")
+	rootCmd.PersistentFlags().Bool("viper", true, "k8study viper")
+	viper.BindPFlag("author", rootCmd.PersistentFlags().Lookup("author"))
+	viper.BindPFlag("usercluster", rootCmd.PersistentFlags().Lookup("cluster"))
+	viper.SetDefault("author", "mntky mntky.deb@gmail.com")
+	viper.SetDefault("license", "GPL")
+
+
+	//ちょっとわからない
+	//rootCmd.AddCommand(addCmd)
+	//rootCmd.AddCommand(initCmd)
+
+
+  // Cobra also supports local flags, which will only run
+  // when this action is called directly.
+  rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+}
+
+
+// initConfig reads in config file and ENV variables if set.
+func initConfig() {
+  if cfgFile != "" {
+    // Use config file from the flag.
+    viper.SetConfigFile(cfgFile)
+  } else {
+    // Find home directory.
+    home, err := homedir.Dir()
+    if err != nil {
+      fmt.Println(err)
+      os.Exit(1)
+    }
+
+    // Search config in home directory with name ".k8s-study" (without extension).
+    viper.AddConfigPath(home)
+    viper.SetConfigName(".k8s-study")
+  }
+
+  viper.AutomaticEnv() // read in environment variables that match
+
+  // If a config file is found, read it in.
+  if err := viper.ReadInConfig(); err == nil {
+    fmt.Println("Using config file:", viper.ConfigFileUsed())
+  }
+}
+
