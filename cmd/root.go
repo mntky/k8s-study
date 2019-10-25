@@ -17,12 +17,10 @@ package cmd
 
 import (
   "fmt"
-  "os"
-  "github.com/spf13/cobra"
 
   homedir "github.com/mitchellh/go-homedir"
+  "github.com/spf13/cobra"
   "github.com/spf13/viper"
-
 )
 
 
@@ -53,7 +51,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&userLicense, "license", "l", "", "GPL")
 	rootCmd.PersistentFlags().Bool("viper", true, "k8study viper")
 	viper.BindPFlag("author", rootCmd.PersistentFlags().Lookup("author"))
-	viper.BindPFlag("usercluster", rootCmd.PersistentFlags().Lookup("cluster"))
+	viper.BindPFlag("useViper", rootCmd.PersistentFlags().Lookup("viper"))
 	viper.SetDefault("author", "mntky mntky.deb@gmail.com")
 	viper.SetDefault("license", "GPL")
 
@@ -65,7 +63,7 @@ func init() {
 
   // Cobra also supports local flags, which will only run
   // when this action is called directly.
-  rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+  //rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
 
 
@@ -78,8 +76,9 @@ func initConfig() {
     // Find home directory.
     home, err := homedir.Dir()
     if err != nil {
-      fmt.Println(err)
-      os.Exit(1)
+			fmt.Println(err)
+      //fmt.Println(err)
+      //os.Exit(1)
     }
 
     // Search config in home directory with name ".k8s-study" (without extension).

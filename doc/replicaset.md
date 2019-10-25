@@ -1,5 +1,0 @@
-# ReplicaSet
-ReplicaSetは理想のPod数にするために作成削除を行う。
-作成する際は、Podテンプレート(理想のレプリカ数を満たすために新しく作成するPodのデータを指定するために用意されるもの）を使用する
-
-kubernetes/pkg/controller/replicaset
