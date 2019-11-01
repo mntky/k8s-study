@@ -14,6 +14,8 @@ if err := command.Execute(); err != nil {
 	}
 ```
 
+---
+
 # 2.NewControllerManagerCommand
 ```go:/cmd/kube-controller-manager/app/controllermanager.go
 func NewControllerManagerCommand() *cobra.Command {
@@ -57,6 +59,8 @@ controller, and serviceaccounts controller.`,
 ```
 kubernetesがよく使用するCLIツール(cobra)を使ってインタフェースを作成している。
 https://github.com/spf13/cobra
+
+---
   
 # 2-1.NewKubeControllerManagerOptions
 ```go:/cmd/kube-controller-manager/app/options/options.go
@@ -182,6 +186,8 @@ func NewKubeControllerManagerOptions() (*KubeControllerManagerOptions, error) {
 ```
 デフォルトのコンフィグでKubeControllerManagerOptionsを作成
 
+---
+
 ## 2-2.Config
 ```go:/cmd/kube-controller-manager/app/options/options.go
 func (s KubeControllerManagerOptions) Config(allControllers []string, disabledByDefaultControllers []string) (*kubecontrollerconfig.Config, error) {
@@ -239,8 +245,138 @@ func (s KubeControllerManagerOptions) Config(allControllers []string, disabledBy
 
 ```
 
-
+---
 ## 2-3.Run
 ```go:cmd/kube-controller-manager/app/controllermanager.go
+func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
+	// To help debugging, immediately log version
+	klog.Infof("Version: %+v", version.Get())
 
+	//ConfigzName(kubecontrollermanager.config.k8s.io)のConfigオブジェクト作成。
+	//各Configはこのconfigzパッケージの/configzハンドラに登録される。
+	if cfgz, err := configz.New(ConfigzName); err == nil {
+		cfgz.Set(c.ComponentConfig)
+	} else {
+		klog.Errorf("unable to register configz: %v", err)
+	}
+
+	//使用するヘルスチェックの設定。
+	var checks []healthz.HealthChecker
+	var electionChecker *leaderelection.HealthzAdaptor
+	if c.ComponentConfig.Generic.LeaderElection.LeaderElect {
+		electionChecker = leaderelection.NewLeaderHealthzAdaptor(time.Second * 20)
+		checks = append(checks, electionChecker)
+	}
+
+	// Start the controller manager HTTP server
+	// unsecuredMux is the handler for these controller *after* authn/authz filters have been applied
+	var unsecuredMux *mux.PathRecorderMux
+	if c.SecureServing != nil {
+		unsecuredMux = genericcontrollermanager.NewBaseHandler(&c.ComponentConfig.Generic.Debugging, checks...)
+		handler := genericcontrollermanager.BuildHandlerChain(unsecuredMux, &c.Authorization, &c.Authentication)
+		// TODO: handle stoppedCh returned by c.SecureServing.Serve
+		if _, err := c.SecureServing.Serve(handler, 0, stopCh); err != nil {
+			return err
+		}
+	}
+	if c.InsecureServing != nil {
+		unsecuredMux = genericcontrollermanager.NewBaseHandler(&c.ComponentConfig.Generic.Debugging, checks...)
+		insecureSuperuserAuthn := server.AuthenticationInfo{Authenticator: &server.InsecureSuperuser{}}
+		handler := genericcontrollermanager.BuildHandlerChain(unsecuredMux, nil, &insecureSuperuserAuthn)
+		if err := c.InsecureServing.Serve(handler, 0, stopCh); err != nil {
+			return err
+		}
+	}
+
+	run := func(ctx context.Context) {
+		rootClientBuilder := controller.SimpleControllerClientBuilder{
+			ClientConfig: c.Kubeconfig,
+		}
+		var clientBuilder controller.ControllerClientBuilder
+		if c.ComponentConfig.KubeCloudShared.UseServiceAccountCredentials {
+			if len(c.ComponentConfig.SAController.ServiceAccountKeyFile) == 0 {
+				// It's possible another controller process is creating the tokens for us.
+				// If one isn't, we'll timeout and exit when our client builder is unable to create the tokens.
+				klog.Warningf("--use-service-account-credentials was specified without providing a --service-account-private-key-file")
+			}
+
+			if shouldTurnOnDynamicClient(c.Client) {
+				klog.V(1).Infof("using dynamic client builder")
+				//Dynamic builder will use TokenRequest feature and refresh service account token periodically
+				clientBuilder = controller.NewDynamicClientBuilder(
+					restclient.AnonymousClientConfig(c.Kubeconfig),
+					c.Client.CoreV1(),
+					"kube-system")
+			} else {
+				klog.V(1).Infof("using legacy client builder")
+				clientBuilder = controller.SAControllerClientBuilder{
+					ClientConfig:         restclient.AnonymousClientConfig(c.Kubeconfig),
+					CoreClient:           c.Client.CoreV1(),
+					AuthenticationClient: c.Client.AuthenticationV1(),
+					Namespace:            "kube-system",
+				}
+			}
+		} else {
+			clientBuilder = rootClientBuilder
+		}
+		controllerContext, err := CreateControllerContext(c, rootClientBuilder, clientBuilder, ctx.Done())
+		if err != nil {
+			klog.Fatalf("error building controller context: %v", err)
+		}
+		saTokenControllerInitFunc := serviceAccountTokenControllerStarter{rootClientBuilder: rootClientBuilder}.startServiceAccountTokenController
+
+		if err := StartControllers(controllerContext, saTokenControllerInitFunc, NewControllerInitializers(controllerContext.LoopMode), unsecuredMux); err != nil {
+			klog.Fatalf("error starting controllers: %v", err)
+		}
+
+		controllerContext.InformerFactory.Start(controllerContext.Stop)
+		controllerContext.ObjectOrMetadataInformerFactory.Start(controllerContext.Stop)
+		close(controllerContext.InformersStarted)
+
+		select {}
+	}
+
+	if !c.ComponentConfig.Generic.LeaderElection.LeaderElect {
+		run(context.TODO())
+		panic("unreachable")
+	}
+
+	id, err := os.Hostname()
+	if err != nil {
+		return err
+	}
+
+	// add a uniquifier so that two processes on the same host don't accidentally both become active
+	id = id + "_" + string(uuid.NewUUID())
+
+	rl, err := resourcelock.New(c.ComponentConfig.Generic.LeaderElection.ResourceLock,
+		c.ComponentConfig.Generic.LeaderElection.ResourceNamespace,
+		c.ComponentConfig.Generic.LeaderElection.ResourceName,
+		c.LeaderElectionClient.CoreV1(),
+		c.LeaderElectionClient.CoordinationV1(),
+		resourcelock.ResourceLockConfig{
+			Identity:      id,
+			EventRecorder: c.EventRecorder,
+		})
+	if err != nil {
+		klog.Fatalf("error creating lock: %v", err)
+	}
+
+	leaderelection.RunOrDie(context.TODO(), leaderelection.LeaderElectionConfig{
+		Lock:          rl,
+		LeaseDuration: c.ComponentConfig.Generic.LeaderElection.LeaseDuration.Duration,
+		RenewDeadline: c.ComponentConfig.Generic.LeaderElection.RenewDeadline.Duration,
+		RetryPeriod:   c.ComponentConfig.Generic.LeaderElection.RetryPeriod.Duration,
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: run,
+			OnStoppedLeading: func() {
+				klog.Fatalf("leaderelection lost")
+			},
+		},
+		WatchDog: electionChecker,
+		Name:     "kube-controller-manager",
+	})
+	panic("unreachable")
+}
 ```
+RunはKubeControllerManagerOptionsを走らせる。この処理は終わらない(はず)
