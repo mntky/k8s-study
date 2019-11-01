@@ -198,6 +198,10 @@ func (s KubeControllerManagerOptions) Config(allControllers []string, disabledBy
 		return nil, fmt.Errorf("error creating self-signed certificates: %v", err)
 	}
 
+	//BuildConfigFromFlagsは、masterURLまたはkubeconfigファイル(path)からコンフィグを構築するヘルパ関数。
+	//クラスタコンポーネントのコマンドラインフラグとして渡される。
+	//masterURL及びkubeconfigファイルパスも渡されない場合inClusterConfig(staging/src/k8s.io/client-go/rest/config.go:410)にフォールバックする。
+	//inVlusterConfigが失敗した場合はDefaultconfigにフォールバックする。
 	kubeconfig, err := clientcmd.BuildConfigFromFlags(s.Master, s.Kubeconfig)
 	if err != nil {
 		return nil, err
@@ -219,6 +223,7 @@ func (s KubeControllerManagerOptions) Config(allControllers []string, disabledBy
 
 	eventRecorder := createRecorder(client, KubeControllerManagerUserAgent)
 
+	//controller managerのメインコンテキスト(cmd/kube-controller-manager/app/config/config.go)
 	c := &kubecontrollerconfig.Config{
 		Client:               client,
 		Kubeconfig:           kubeconfig,
@@ -233,16 +238,9 @@ func (s KubeControllerManagerOptions) Config(allControllers []string, disabledBy
 }
 
 ```
-Controller manager configを返す
 
 
+## 2-3.Run
+```go:cmd/kube-controller-manager/app/controllermanager.go
 
-
-
-
-
-
-
-
-
-
+```
