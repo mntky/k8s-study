@@ -1,6 +1,6 @@
 #!/bin/bash
 
-kubeadm init --pod-network-cidr=10.224.0.0/16 --apiserver-advertise-address=10.111.69.1
+kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=10.111.69.1
 
 mkdir $HOME/.kube
 cp /etc/kubernetes/admin.conf $HOME/.kube/config
