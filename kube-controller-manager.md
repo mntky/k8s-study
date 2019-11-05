@@ -263,14 +263,22 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 	//使用するヘルスチェックの設定。
 	var checks []healthz.HealthChecker
 	var electionChecker *leaderelection.HealthzAdaptor
+
+	//リーダ選出が有効(Raft Algorithm)
 	if c.ComponentConfig.Generic.LeaderElection.LeaderElect {
 		electionChecker = leaderelection.NewLeaderHealthzAdaptor(time.Second * 20)
+		/leaderのhealthcheckをcheckに追加
 		checks = append(checks, electionChecker)
 	}
 
 	// Start the controller manager HTTP server
 	// unsecuredMux is the handler for these controller *after* authn/authz filters have been applied
+	//unsecuredMuxは以下のフィルタが適用されたコントローラのハンドラ
+	// authn = AutheNtication = 認証
+	// authz = AuthoriZation = 承認
 	var unsecuredMux *mux.PathRecorderMux
+
+	//HTTPS
 	if c.SecureServing != nil {
 		unsecuredMux = genericcontrollermanager.NewBaseHandler(&c.ComponentConfig.Generic.Debugging, checks...)
 		handler := genericcontrollermanager.BuildHandlerChain(unsecuredMux, &c.Authorization, &c.Authentication)
@@ -279,6 +287,8 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 			return err
 		}
 	}
+
+	//HTTP
 	if c.InsecureServing != nil {
 		unsecuredMux = genericcontrollermanager.NewBaseHandler(&c.ComponentConfig.Generic.Debugging, checks...)
 		insecureSuperuserAuthn := server.AuthenticationInfo{Authenticator: &server.InsecureSuperuser{}}
@@ -292,21 +302,27 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 		rootClientBuilder := controller.SimpleControllerClientBuilder{
 			ClientConfig: c.Kubeconfig,
 		}
+		//クライアントとコントローラのconfigを取得
 		var clientBuilder controller.ControllerClientBuilder
+
+		//コントローラを個々のサービスアカウント資格情報で実行するか。
 		if c.ComponentConfig.KubeCloudShared.UseServiceAccountCredentials {
+			//privateRSAキーがあるかどうか。
 			if len(c.ComponentConfig.SAController.ServiceAccountKeyFile) == 0 {
-				// It's possible another controller process is creating the tokens for us.
-				// If one isn't, we'll timeout and exit when our client builder is unable to create the tokens.
+				//別のコントローラプロセスがトークンを作成している可能性がある。
+				//クライアントビルダーがトークンを作成できない場合タイムアウトして終了する。
 				klog.Warningf("--use-service-account-credentials was specified without providing a --service-account-private-key-file")
 			}
 
 			if shouldTurnOnDynamicClient(c.Client) {
 				klog.V(1).Infof("using dynamic client builder")
 				//Dynamic builder will use TokenRequest feature and refresh service account token periodically
+				//DynamicbuilderはTokenRequest機能を利用し、サービスアカウントトークンを定期的に更新する。
 				clientBuilder = controller.NewDynamicClientBuilder(
 					restclient.AnonymousClientConfig(c.Kubeconfig),
-					c.Client.CoreV1(),
-					"kube-system")
+					c.Client.CoreV1(),		//
+					"kube-system"					//namespace)
+
 			} else {
 				klog.V(1).Infof("using legacy client builder")
 				clientBuilder = controller.SAControllerClientBuilder{
