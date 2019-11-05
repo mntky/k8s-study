@@ -325,6 +325,7 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 
 			} else {
 				klog.V(1).Infof("using legacy client builder")
+				//サービスアカウントとして識別するクライアントを返す。
 				clientBuilder = controller.SAControllerClientBuilder{
 					ClientConfig:         restclient.AnonymousClientConfig(c.Kubeconfig),
 					CoreClient:           c.Client.CoreV1(),
