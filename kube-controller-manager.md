@@ -344,6 +344,7 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 		}
 		saTokenControllerInitFunc := serviceAccountTokenControllerStarter{rootClientBuilder: rootClientBuilder}.startServiceAccountTokenController
 
+		//各コントローラの起動。NewControllerInitializersで作ったmapをStartControllersに渡して動かしている。
 		if err := StartControllers(controllerContext, saTokenControllerInitFunc, NewControllerInitializers(controllerContext.LoopMode), unsecuredMux); err != nil {
 			klog.Fatalf("error starting controllers: %v", err)
 		}
@@ -401,7 +402,8 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 RunはKubeControllerManagerOptionsを走らせる。この処理は終わらない(はず)
 
 
-## 2-4.CreateControllerContext
+//CreateControllerContext一旦ストップ
+## 2-3-1.CreateControllerContext
 ```go:cmd/kube-controller-manager/app/controllermanager.go
 	//TODO:versionedClient辺をよく調べる。
 	versionedClient := rootClientBuilder.ClientOrDie("shared-informers")
@@ -453,5 +455,121 @@ RunはKubeControllerManagerOptionsを走らせる。この処理は終わらな�
 		ResyncPeriod:                    ResyncPeriod(s),
 	}
 	return ctx, nil
+}
+```
+
+## 2-3-2.NewControllerInitializers
+```go:cmd/kube-controller-manager/app/controllermanager.go
+func NewControllerInitializers(loopMode ControllerLoopMode) map[string]InitFunc {
+	controllers := map[string]InitFunc{}
+	controllers["endpoint"] = startEndpointController
+	controllers["endpointslice"] = startEndpointSliceController
+	controllers["replicationcontroller"] = startReplicationController
+	controllers["podgc"] = startPodGCController
+	controllers["resourcequota"] = startResourceQuotaController
+	controllers["namespace"] = startNamespaceController
+	controllers["serviceaccount"] = startServiceAccountController
+	controllers["garbagecollector"] = startGarbageCollectorController
+	controllers["daemonset"] = startDaemonSetController
+	controllers["job"] = startJobController
+	controllers["deployment"] = startDeploymentController
+	controllers["replicaset"] = startReplicaSetController
+	controllers["horizontalpodautoscaling"] = startHPAController
+	controllers["disruption"] = startDisruptionController
+	controllers["statefulset"] = startStatefulSetController
+	controllers["cronjob"] = startCronJobController
+	controllers["csrsigning"] = startCSRSigningController
+	controllers["csrapproving"] = startCSRApprovingController
+	controllers["csrcleaner"] = startCSRCleanerController
+	controllers["ttl"] = startTTLController
+	controllers["bootstrapsigner"] = startBootstrapSignerController
+	controllers["tokencleaner"] = startTokenCleanerController
+	controllers["nodeipam"] = startNodeIpamController
+	controllers["nodelifecycle"] = startNodeLifecycleController
+	if loopMode == IncludeCloudLoops {
+		controllers["service"] = startServiceController
+		controllers["route"] = startRouteController
+		controllers["cloud-node-lifecycle"] = startCloudNodeLifecycleController
+		// TODO: volume controller into the IncludeCloudLoops only set.
+	}
+	controllers["persistentvolume-binder"] = startPersistentVolumeBinderController
+	controllers["attachdetach"] = startAttachDetachController
+	controllers["persistentvolume-expander"] = startVolumeExpandController
+	controllers["clusterrole-aggregation"] = startClusterRoleAggregrationController
+	controllers["pvc-protection"] = startPVCProtectionController
+	controllers["pv-protection"] = startPVProtectionController
+	controllers["ttl-after-finished"] = startTTLAfterFinishedController
+	controllers["root-ca-cert-publisher"] = startRootCACertPublisher
+
+	return controllers
+}
+
+```
+
+## 2-3-3.StartControllers
+```go:cmd/kube-controller-manager/app/controllermanager.go
+	//コントローラのセットを開始する。
+	// Always start the SA token controller first using a full-power client, since it needs to mint tokens for the rest
+	// If this fails, just return here and fail since other controllers won't be able to get credentials.
+	//full-powerクライアントを使って、サービスアカウントトークンコントローラの起動。
+	if _, _, err := startSATokenController(ctx); err != nil {
+		return err
+	}
+
+	// Initialize the cloud provider with a reference to the clientBuilder only after token controller
+	// has started in case the cloud provider uses the client builder.
+	//クラウドプロバイダ(kubeadm,aws,azure...)がclientBuilderを使用する場合,
+	//TokenControllerが起動した後のみclientBuilderへの参照でクラウドプロバイダを初期化する。
+	if ctx.Cloud != nil {
+		ctx.Cloud.Initialize(ctx.ClientBuilder, ctx.Stop)
+	}
+
+	//NewControllerInitializersで作られたmapに入ってる各コントローラ
+	for controllerName, initFn := range controllers {
+		if !ctx.IsControllerEnabled(controllerName) {
+			//僕の場合"endpointslice"だけdisabledだった。
+			klog.Warningf("%q is disabled", controllerName)
+			continue
+		}
+
+		time.Sleep(wait.Jitter(ctx.ComponentConfig.Generic.ControllerStartInterval.Duration, ControllerStartJitter))
+
+		//↓このログ確認できない:thinkingface
+		klog.V(1).Infof("Starting %q", controllerName)
+		//initFnに各controllerのスタートする関数名が入ってるのでここでスタート
+		debugHandler, started, err := initFn(ctx)
+		if err != nil {
+			klog.Errorf("Error starting %q", controllerName)
+			return err
+		}
+		if !started {
+			klog.Warningf("Skipping %q", controllerName)
+			continue
+		}
+		if debugHandler != nil && unsecuredMux != nil {
+			basePath := "/debug/controllers/" + controllerName
+			unsecuredMux.UnlistedHandle(basePath, http.StripPrefix(basePath, debugHandler))
+			unsecuredMux.UnlistedHandlePrefix(basePath+"/", http.StripPrefix(basePath, debugHandler))
+		}
+		klog.Infof("Started %q", controllerName)
+	}
+
+	return nil
+}
+```
+
+### 上記initFn(ctx)がreplicasetcontrollerの場合
+```go:/vmd/kube-controller-manager/app/apps.go
+func startReplicaSetController(ctx ControllerContext) (http.Handler, bool, error) {
+	if !ctx.AvailableResources[schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"}] {
+		return nil, false, nil
+	}
+	go replicaset.NewReplicaSetController(
+		ctx.InformerFactory.Apps().V1().ReplicaSets(),
+		ctx.InformerFactory.Core().V1().Pods(),
+		ctx.ClientBuilder.ClientOrDie("replicaset-controller"),
+		replicaset.BurstReplicas,
+	).Run(int(ctx.ComponentConfig.ReplicaSetController.ConcurrentRSSyncs), ctx.Stop)
+	return nil, true, nil
 }
 ```
