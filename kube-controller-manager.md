@@ -333,8 +333,10 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 					Namespace:            "kube-system",
 				}
 			}
+
+		//UseServiceAccountCredentials使わないとき
 		} else {
-			clientBuilder = rootClientBuilder
+			clientBuilder = rootClientBuilder //:198
 		}
 		controllerContext, err := CreateControllerContext(c, rootClientBuilder, clientBuilder, ctx.Done())
 		if err != nil {
@@ -397,3 +399,59 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 }
 ```
 RunはKubeControllerManagerOptionsを走らせる。この処理は終わらない(はず)
+
+
+## 2-4.CreateControllerContext
+```go:cmd/kube-controller-manager/app/controllermanager.go
+	//TODO:versionedClient辺をよく調べる。
+	versionedClient := rootClientBuilder.ClientOrDie("shared-informers")
+
+	//すべての名前空間に対してsharedinformaerfactoryの新しいインスタンスを構築する。
+	//https://github.com/kubernetes/sample-controller/blob/master/docs/controller-client-go.md#client-go-components
+	sharedInformers := informers.NewSharedInformerFactory(versionedClient, ResyncPeriod(s)())
+
+	metadataClient := metadata.NewForConfigOrDie(rootClientBuilder.ConfigOrDie("metadata-informers"))
+	metadataInformers := metadatainformer.NewSharedInformerFactory(metadataClient, ResyncPeriod(s)())
+
+	//apiserverが動いていない場合、待ってから(10秒)失敗する。
+	//apiserverとcontrollermanagerを同時に起動する場合に特に重要。
+	//WaitForAPIServerは、APIサーバの/healthzエンドポイントがタイムアウトでokを報告するのを待つ。(今回の場合10秒)
+	if err := genericcontrollermanager.WaitForAPIServer(versionedClient, 10*time.Second); err != nil {
+		return ControllerContext{}, fmt.Errorf("failed to wait for apiserver being healthy: %v", err)
+	}
+
+	// Use a discovery client capable of being refreshed.
+	discoveryClient := rootClientBuilder.ClientOrDie("controller-discovery")
+	cachedClient := cacheddiscovery.NewMemCacheClient(discoveryClient.Discovery())
+	restMapper := restmapper.NewDeferredDiscoveryRESTMapper(cachedClient)
+	go wait.Until(func() {
+		restMapper.Reset()
+	}, 30*time.Second, stop)
+
+	availableResources, err := GetAvailableResources(rootClientBuilder)
+	if err != nil {
+		return ControllerContext{}, err
+	}
+
+	cloud, loopMode, err := createCloudProvider(s.ComponentConfig.KubeCloudShared.CloudProvider.Name, s.ComponentConfig.KubeCloudShared.ExternalCloudVolumePlugin,
+		s.ComponentConfig.KubeCloudShared.CloudProvider.CloudConfigFile, s.ComponentConfig.KubeCloudShared.AllowUntaggedCloud, sharedInformers)
+	if err != nil {
+		return ControllerContext{}, err
+	}
+
+	ctx := ControllerContext{
+		ClientBuilder:                   clientBuilder,
+		InformerFactory:                 sharedInformers,
+		ObjectOrMetadataInformerFactory: controller.NewInformerFactory(sharedInformers, metadataInformers),
+		ComponentConfig:                 s.ComponentConfig,
+		RESTMapper:                      restMapper,
+		AvailableResources:              availableResources,
+		Cloud:                           cloud,
+		LoopMode:                        loopMode,
+		Stop:                            stop,
+		InformersStarted:                make(chan struct{}),
+		ResyncPeriod:                    ResyncPeriod(s),
+	}
+	return ctx, nil
+}
+```
