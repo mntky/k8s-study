@@ -15,8 +15,12 @@ limitations under the License.
 */
 package main
 
-import "k8s-study/cmd"
+import (
+	"./testcmd"
+)
 
 func main() {
-  cmd.Execute()
+
+	command := app.NewControllerManagerCommand()
+	command.Execute()
 }
