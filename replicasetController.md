@@ -1,8 +1,21 @@
-# ReplicasetController
+# ReplicationController
 
 定義されたReplicaSetオブジェクトを実行中のPodと同期させる。
+ReplicationControllerはrolling-updateの機能があるが、ReplicaSetControllerには無い。
 
-[startRelicationController]->[NewReplicationManager]->[ReplicasetController]->
+[startRelicationController]
+cmd/kube-controller-manager/app/core.go:335
+↓
+[NewReplicationManager]
+pkg/controller/replication/replication_controller:52
+↓
+[NewBaseController]
+pkg/controller/replicaset/replica_set.go:126
+ReplicaSetControllerの構造体使う
+↓
+[Run]
+pkg/controller/replicaset/replica_set.go:177
+
 
 エントリーポイント
 ```go:cmd/kube-controller-manager/app/core.go
