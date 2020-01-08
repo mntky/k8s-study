@@ -43,6 +43,7 @@ func (rsc *ReplicaSetController) Run(workers int, stopCh <-chan struct{}) {
 
 ↑のwait.Untilで呼ばれている関数
 ```
+//TODO stopChについて調べる。
 func JitterUntil(f func(), period time.Duration, jitterFactor float64, sliding bool, stopCh <-chan struct{}) {
 	var t *time.Timer
 	var sawTimeout bool

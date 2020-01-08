@@ -86,4 +86,26 @@ type ReplicaSetController struct {
 }
 ```
 
+pod数の監視と同期
+```go:pkg/controller/replicaset/replica_set.go
+func (rsc *ReplicaSetController) Run(workers int, stopCh <-chan struct{}) {
+	defer utilruntime.HandleCrash()
+	defer rsc.queue.ShutDown()
+
+	//ハードコードで"ReplicaSet"を使用するのではなくrsc.Kindを使用している。
+	controllerName := strings.ToLower(rsc.Kind)
+	klog.Infof("Starting %v controller", controllerName)
+	defer klog.Infof("Shutting down %v controller", controllerName)
+
+	if !cache.WaitForNamedCacheSync(rsc.Kind, stopCh, rsc.podListerSynced, rsc.rsListerSynced) {
+		return
+	}
+
+	for i := 0; i < workers; i++ {
+		go wait.Until(rsc.worker, time.Second, stopCh)
+	}
+
+	<-stopCh
+}
+```
 
