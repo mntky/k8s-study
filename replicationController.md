@@ -16,6 +16,8 @@ ReplicaSetControllerの構造体使う
 [Run]
 pkg/controller/replicaset/replica_set.go:177
 
+※controllerContext(cmd/kube-controller-manager/app/controllermanager.go:289)
+
 
 エントリーポイント
 ```go:cmd/kube-controller-manager/app/core.go
@@ -88,6 +90,8 @@ type ReplicaSetController struct {
 
 pod数の監視と同期
 ```go:pkg/controller/replicaset/replica_set.go
+//workersは同時に同期できるreplication-controllerの数。
+//大きい数の場合は応答性の高いレプリカ管理が可能。(CPU負荷は高くなる)
 func (rsc *ReplicaSetController) Run(workers int, stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 	defer rsc.queue.ShutDown()
@@ -97,6 +101,9 @@ func (rsc *ReplicaSetController) Run(workers int, stopCh <-chan struct{}) {
 	klog.Infof("Starting %v controller", controllerName)
 	defer klog.Infof("Shutting down %v controller", controllerName)
 
+	//rsc.Kindはコントローラの名前を保持しており,
+	//その名前で識別される呼び出し元が同期を待機しており、
+	//同期の成功か失敗を示すログメッセージを生成する。
 	if !cache.WaitForNamedCacheSync(rsc.Kind, stopCh, rsc.podListerSynced, rsc.rsListerSynced) {
 		return
 	}
